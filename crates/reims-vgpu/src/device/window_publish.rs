@@ -206,9 +206,7 @@ pub fn device_window_start(id: u64, width: u32, height: u32) -> bool {
             Arc::clone(&exited),
             Arc::clone(&wake),
         ) {
-            crate::observe::Emit::decline("host_window_start", &error)
-                .field("id", id)
-                .fail();
+            refuse_window_start(id, &error);
             return false;
         }
         (None, exited)
@@ -226,9 +224,7 @@ pub fn device_window_start(id: u64, width: u32, height: u32) -> bool {
     ) {
         Ok(thread) => Some(thread),
         Err(error) => {
-            crate::observe::Emit::decline("host_window_start", &error)
-                .field("id", id)
-                .fail();
+            refuse_window_start(id, &error);
             return false;
         }
     };
@@ -258,6 +254,29 @@ pub fn device_window_start(id: u64, width: u32, height: u32) -> bool {
         }
     ));
     true
+}
+
+/// Refuse a host-window start on both channels. The fail log is for analysis;
+/// stderr is for the operator, who otherwise sees a boot that seems to hang at
+/// the end of the EFI serial output, with no window and no reason.
+#[cfg(feature = "host-window")]
+fn refuse_window_start(id: u64, error: &crate::host_window::present::WindowError) {
+    use crate::host_window::present::WindowError;
+    crate::observe::Emit::decline("host_window_start", error)
+        .field("id", id)
+        .fail();
+    let hint = if cfg!(all(unix, not(target_os = "macos")))
+        && matches!(error, WindowError::EventLoopBuild(_))
+    {
+        " Check WAYLAND_DISPLAY and DISPLAY: winit uses Wayland whenever \
+         WAYLAND_DISPLAY is set and does not fall back to X11."
+    } else {
+        ""
+    };
+    eprintln!(
+        "reims-vgpu-window: cannot open the host window ({error}). QEMU's own \
+         display takes over, which shows nothing under -display none.{hint}"
+    );
 }
 
 /// No-op stub when the `host-window` feature is off: the FFI symbol still links
